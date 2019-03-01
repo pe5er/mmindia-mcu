@@ -96,7 +96,7 @@ word NEW_RIGHT;
 word OLD_RIGHT;
 word DIFF_RIGHT;
 
-int adc1, adc2, adc3, adc4, adc5, intcounter;
+int adc1, adc2, adc3, adc4, adc5, intcounter, select, preselect;
 
 void main(void)
 {
@@ -137,29 +137,73 @@ void main(void)
 	//	PTBDD = 0b11111111;
 	//	PTBD = 0;
 	
+        select = 0;
+        preselect = 2;
+        intcounter = 5;
+        
         PTADD = 0xFF;     //LCD pins
         PTGDD = 0x07;     //LCD read/enable
         ADC1CFG = 0x70;   //white line sensor
-
-        
-        delay(50000);
-        delay(50000);
-        delay(50000);
-        
+       
         lcd_init();
-         
+        
+        delay(50000);
+        delay(50000);
+        delay(50000);
+        
         writecmd(0x81); //moves cursor
-
         writedata('I');
         writedata('N');
         writedata('D');
         writedata('I');
         writedata('A');
-
-        intcounter = 5;
-
+        
+        while((PTDD & 0b00000100) != 0){
+        
+        if ((PTDD & 0b00001000) == 0){select++;}
+        if (preselect != select){
+        if (select > 2){select = 0;}
+        preselect = select;        
+        switch (select){
+                
+                case 0:
+                writecmd(0xC1);
+                writedata('A');
+                writedata('V');
+                writedata('O');
+                writedata('I');
+                writedata('D');
+                writedata(' ');
+                        break;
+                case 1:
+                writecmd(0xC1);
+                writedata('L');
+                writedata('I');
+                writedata('N');
+                writedata('E');
+                writedata(' ');
+                        break;
+                case 2:
+                writecmd(0xC1);
+                writedata('B');
+                writedata('A');
+                writedata('T');
+                writedata('T');
+                writedata('L');
+                writedata('E');
+                        break;
+        }
+        while((PTDD & 0b00001000) == 0){}
+        }
+        }
+        
     EnableInterrupts;   // enable interrupts
   
+    switch (select){
+    
+        case 0:
+        
+        case 1:
     for(;;) {
  
 	DRIVE = FWD;
@@ -180,6 +224,19 @@ void main(void)
 	}
 
     }   // loop forever
+                break;
+        case 2:
+        for(;;){
+	DRIVE = FWD;
+	
+	if(adc1 < 50){iravoidr();}
+	if(adc5 < 50){iravoidl();}
+	//if((adc1 & adc2 & adc3 & adc4 & adc5) < 50){
+	//        if (adc1>adc5){revleft();}else{revright();}
+	//}
+        }
+                break;
+    }
 
 }
 
@@ -370,7 +427,7 @@ void lineright (void)
 
 void lineturnleft (void)
 {
-        DISTANCE = 100;
+        DISTANCE = 40;
         DRIVE = ACW;
         while (DISTANCE != 0){}
 }
