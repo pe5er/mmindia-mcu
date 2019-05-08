@@ -57,6 +57,7 @@ void turnright (void);
 void lineleft (void);
 void lineright (void);
 void lineturnleft (void);
+void lineturnright (void);
 void iravoidl (void);
 void iravoidr (void);
 void speedcon (void);
@@ -65,6 +66,7 @@ void lcd_init(void);
 void writecmd(int);
 void writedata(char);
 void delay(int);
+void distdelay(int);
 
 //The motors are connected to Port F bits 0 to 3 in pairs.
 //Sense of switching is 01 = forward, 10 = reverse,
@@ -75,7 +77,7 @@ byte MODCNTH = 0x4E, MODCNTL = 0x20;            // values for the modulo registe
 
 byte INIT_CHNCNTH = 0x40, INIT_CHNCNTL = 0x00;  // set the IOC register to 0x3000 for output compare function
 
-byte lcdadc1[2], lcdadc2[2], lcdadc3[2], lcdadc4[2], lcdadc5[2];
+byte lcdadc1[2], lcdadc2[2], lcdadc3[2], lcdadc4[2], lcdadc5[2], lcderr[1];
 
 word REPEAT = 0x4E20;
 word NOM_SPEED = 0x2000;
@@ -96,7 +98,11 @@ word NEW_RIGHT;
 word OLD_RIGHT;
 word DIFF_RIGHT;
 
-int adc1, adc2, adc3, adc4, adc5, intcounter, select, preselect;
+int adc1, adc2, adc3, adc4, adc5, intcounter, select, preselect, error, errlcd, alladc, adc1hl, adc2hl, adc3hl, adc4hl, adc5hl, mode;
+long alladcext ;
+
+int Kp = 2048;
+int speedChange = 0;
 
 void main(void)
 {
@@ -147,17 +153,13 @@ void main(void)
        
         lcd_init();
         
-        delay(50000);
-        delay(50000);
-        delay(50000);
-        
         writecmd(0x81); //moves cursor
         writedata('I');
         writedata('N');
         writedata('D');
         writedata('I');
         writedata('A');
-        
+              
         while((PTDD & 0b00000100) != 0){
         
         if ((PTDD & 0b00001000) == 0){select++;}
@@ -177,11 +179,11 @@ void main(void)
                         break;
                 case 1:
                 writecmd(0xC1);
+                writedata(' ');
                 writedata('L');
                 writedata('I');
                 writedata('N');
                 writedata('E');
-                writedata(' ');
                         break;
                 case 2:
                 writecmd(0xC1);
@@ -197,45 +199,63 @@ void main(void)
         }
         }
         
-    EnableInterrupts;   // enable interrupts
-  
+        EnableInterrupts;
+          
     switch (select){
     
         case 0:
+    for(;;) {
+    
+        DRIVE = FWD;
         
+        if ((PTDD & 0b00001100) != 0b00001100){
+        if ((PTDD & 0b00001000) == 0){revleft();}
+        if ((PTDD & 0b00000100) == 0){revright();}
+        }
+        if ((PTDD & 0b11000000) != 0){
+        if ((PTDD_PTDD7== 0)&(PTDD_PTDD6==1)){iravoidl();}
+        if ((PTDD_PTDD7== 1)&(PTDD_PTDD6==0)){iravoidr();}
+        }
+    }    
         case 1:
     for(;;) {
  
-	DRIVE = FWD;
-
-        if (adc2 > 50){lineright();}
-        if (adc4 > 50){lineleft();}
-                
+        if ((adc2 & adc3 & adc4)<50)
+        {
+        DRIVE = FWD;
+        }
+        else
+        {
+        if (adc1 > 50){lineright();}
+        if (adc5 > 50){lineleft();}
+        }
+        //if ((adc1 & adc2 & adc3 & adc4) < 60){lineturnleft();}
+        //if ((adc2 & adc3 & adc4 & adc5) < 60){lineturnright();}
         if ((adc1 & adc2 & adc3 & adc4 & adc5) > 50){lineturnleft();}
+                
+        //if ((adc1 & adc2 & adc3 & adc4 & adc5) > 50){lineturnleft();}
         
-	if ((PTDD & 0b00001100) != 0b00001100){
-		if ((PTDD & 0b00001000) == 0){revleft();}
-		if ((PTDD & 0b00000100) == 0){revright();}
-	}
-	if ((PTDD & 0b11000000) != 0){
-		if ((PTDD_PTDD7== 0)&(PTDD_PTDD6==1)){iravoidl();}
-		if ((PTDD_PTDD7== 1)&(PTDD_PTDD6==0)){iravoidr();}
-
-	}
-
-    }   // loop forever
-                break;
+    }
+    
         case 2:
         for(;;){
-	DRIVE = FWD;
-	
-	if(adc1 < 50){iravoidr();}
-	if(adc5 < 50){iravoidl();}
-	//if((adc1 & adc2 & adc3 & adc4 & adc5) < 50){
-	//        if (adc1>adc5){revleft();}else{revright();}
-	//}
+	      DRIVE = FWD;
+		
+        if(adc1 > 50){iravoidr();mode = 0;}
+	      if(adc5 > 50){iravoidl();mode = 0;}
+	      //if((adc1 & adc2 & adc3 & adc4 & adc5) < 50){
+    	  //        if (adc1>adc5){revleft();}else{revright();}
+    	  //}
+        if ((PTDD & 0b11000000) != 0){
+        if ((PTDD_PTDD7== 0)&(PTDD_PTDD6==1)){lineright();mode = 1;}
+        if ((PTDD_PTDD7== 1)&(PTDD_PTDD6==0)){lineleft();mode = 1;}
         }
-                break;
+        
+        if ((PTDD & 0b00001100) != 0b00001100){
+        if ((PTDD & 0b00001000) == 0){distdelay(50);reverse();mode = 2;}
+        if ((PTDD & 0b00000100) == 0){distdelay(50);reverse();mode = 2;}
+        }
+        }
     }
 
 }
@@ -278,15 +298,75 @@ interrupt 11 void TPM1SC_overflow()
         while (ADC1SC1_COCO == 0){  
         }
         adc5 = ADC1RL*100/257;
-         
+        
+        switch (select){
+        
+        case 0:
+        break;
+                
+        case 1:
+        
+        if (adc1>60){
+        adc1hl = 0;}else{adc1hl = 10000;}
+        
+        if (adc2>60){
+        adc2hl = 0;}else{adc2hl = 1000;}
+        
+        if (adc3>60){
+        adc3hl = 0;}else{adc3hl = 100;}
+        
+        if (adc4>60){
+        adc4hl = 0;}else{adc4hl = 10;}
+        
+        if (adc5>60){
+        adc5hl = 0;}else{adc5hl = 1;}
+        
+        alladc = adc1hl+adc2hl+adc3hl+adc4hl+adc5hl;
+        switch (alladc){
+        
+        default:
+                error = 0;
+                break;
+        case 1 :
+                error = 4;
+                break;
+        case 11 :
+                error = 3;
+                break;
+        case 111 :
+                error = 2;
+                break;
+        case 110 :
+                error = 1;
+                break;
+        case 1110 :
+                error = 0;
+                break;
+        case 1100 :
+                error = -1;
+                break;
+        case 11100 :
+                error = -2;
+                break;
+        case 11000 :
+                error = -3;
+                break;
+        case 10000 :
+                error = -4;
+                break;
+        }
+        
         if(intcounter == 1){
         intcounter = 50;       
- 
+        
         sprintf(lcdadc1,"%1d",adc1);
         sprintf(lcdadc2,"%1d",adc2);
         sprintf(lcdadc3,"%1d",adc3);
         sprintf(lcdadc4,"%1d",adc4);
         sprintf(lcdadc5,"%1d",adc5);
+        
+        errlcd = error + 5;
+        sprintf(lcderr,"%1d",errlcd);
         
         if(adc1<10){
         lcdadc1[1]=lcdadc1[0];
@@ -317,10 +397,52 @@ interrupt 11 void TPM1SC_overflow()
         writedata(lcdadc2[0]);
         writedata(lcdadc1[0]);
         writedata('.');
-        writedata('%');
+        writedata(lcderr[0]);
+        }
+        break;
+        
+        case 2:
+        if(intcounter == 1){
+        intcounter = 50;
+        writecmd(0xC0);
+        switch (mode){
+        
+        case 0:
+        writedata(' ');
+        writedata('D');
+        writedata('O');
+        writedata('D');
+        writedata('G');
+        writedata('E');
+        writedata('D');
+        writedata(' ');
+        break;
+                
+        case 1:
+        writedata('S');
+        writedata('P');
+        writedata('O');
+        writedata('T');
+        writedata('T');
+        writedata('E');
+        writedata('D');
+        writedata(' ');
+        break;
+        
+        case 2:
+        writedata('!');
+        writedata('B');
+        writedata('A');
+        writedata('A');
+        writedata('A');
+        writedata('M');
+        writedata('M');
+        writedata('!');
+        break;
         
         }
-
+        }
+        }
 }
 
 interrupt 6 void TPM1C1SC_int()
@@ -392,7 +514,7 @@ void stop (void)
 
 void reverse (void)
 {
-        DISTANCE = 200;
+        DISTANCE = 100;
         DRIVE = REV;
         while (DISTANCE != 0){}
 }
@@ -431,6 +553,14 @@ void lineturnleft (void)
         DRIVE = ACW;
         while (DISTANCE != 0){}
 }
+
+void lineturnright (void)
+{
+        DISTANCE = 40;
+        DRIVE = ACW;
+        while (DISTANCE != 0){}
+}
+
 
 void iravoidl (void)
 {
@@ -512,10 +642,17 @@ void writecmd(int z){
         delay(150);
  
         }
- 
+        
 void delay(int a){
  
         int i;      
         for(i=0;i<a;i++){   
                 }                
         }
+ 
+void distdelay(int a){
+
+        DISTANCE = a;
+        while (DISTANCE != 0){}
+                        
+       }
