@@ -1,41 +1,18 @@
 /*
-
-
-
-Test Programme for the AW60 micromouse board
-
-
-This version gives direction control of the two motors but with interrupts to
-give PWM speed control. Inputs from the Hall Effect tachometers are used to
-adjust the motor speeds so that the machine travels in a straight line.
-
-Three interrupts are used to PWM the motors: the timer overflow for TPM1 timer,
-which sets the overflow frequency of 100 Hz with bus clock rate 2MHz, turns both
-motors on. TPM1 channel 1 and TPM1 channel 2 turn off the left and right motors.
-Variables PWM_LEFT and PWM_RIGHT are the "instantaneous" values of PWM.
-
-Two interrupts are used to measure the speed of the left and right motors.
-Consecutive TPM2 channel 0 and channel 1 interrupts are subtracted to give
-two variables DIFF_LEFT and DIFF_RIGHT which are used by the procedure "speedcon".
-
-
-The main programme performs a simple avoidance action, using active low inputs from
-the touch bars and active high inputs from the IR sensors.
-
-Variable COUNTER is a 16-bit integer which is decremented every 10 ms.
-Variable DISTANCE is a 16-bit integer which is decremented after every
-tachometer pulse. One mm of travel is approximately 4 units in DISTANCE.
-
-
-
+MicroMouse Team:India 2018/19
 */
 
+
+//Include Statements
 #include <hidef.h>      // for EnableInterrupts macro
 #include "derivative.h" // include peripheral declarations
 #include <stdio.h>
 
+
+//Port Definitions
 #define TBFL PTAD_PTAD1
 
+//Bit Definitions
 #define STOP  0b00000000
 #define FWD   0b00000101
 #define REV   0b00001010
@@ -44,10 +21,12 @@ tachometer pulse. One mm of travel is approximately 4 units in DISTANCE.
 #define SFL   0b00000001 //Swerve forward and left
 #define SFR   0b00000100 //Swerve forward and right
 
+//Constants
 #define bitClear 0
 #define SCALE 1
 
 
+//Procedure Declarations
 void revleft (void);
 void revright (void);
 void stop (void);
@@ -61,12 +40,12 @@ void lineturnright (void);
 void iravoidl (void);
 void iravoidr (void);
 void speedcon (void);
-
 void lcd_init(void);
 void writecmd(int);
 void writedata(char);
 void delay(int);
 void distdelay(int);
+
 
 //The motors are connected to Port F bits 0 to 3 in pairs.
 //Sense of switching is 01 = forward, 10 = reverse,
@@ -77,8 +56,11 @@ byte MODCNTH = 0x4E, MODCNTL = 0x20;            // values for the modulo registe
 
 byte INIT_CHNCNTH = 0x40, INIT_CHNCNTL = 0x00;  // set the IOC register to 0x3000 for output compare function
 
+//Declare White Line Sensor Variables
 byte lcdadc1[2], lcdadc2[2], lcdadc3[2], lcdadc4[2], lcdadc5[2], lcderr[1];
 
+
+//Word Declarations
 word REPEAT = 0x4E20;
 word NOM_SPEED = 0x2000;
 word PW_LEFT = 0x2000;
@@ -98,154 +80,150 @@ word NEW_RIGHT;
 word OLD_RIGHT;
 word DIFF_RIGHT;
 
+
+//Declare Integers
 int adc1, adc2, adc3, adc4, adc5, intcounter, select, preselect, error, errlcd, alladc, adc1hl, adc2hl, adc3hl, adc4hl, adc5hl, mode;
 long alladcext ;
 
+//PID Loop Variables
 int Kp = 2048;
 int speedChange = 0;
+
+
+// *************************************************************************************************************************************
+// *************************************************************************************************************************************
+
+//Start Here! Void Main
+
+// *************************************************************************************************************************************
+// *************************************************************************************************************************************
 
 void main(void)
 {
 	
+	//Initial Setup
     SOPT   = 0x00;      // disable COP (watchtimer)
-
 	ICGC1 = 0x74;	// select external quartz crystal
 
     // Init_GPIO init code 
-
     PTFDD = 0x0F;   // set port F as outputs for motor drive on bits PTFD bits 0-3.
-
     PTDPE = 0b00001100; // use PTDD bits 2, 3 as input ports for touch bars
 
-
-   
-    // configure TPM module 1
-                                                                                                                                                                                                                                   
+    // configure TPM module 1                                                                                                                                                                                                                                   
     TPM1SC   = 0x48;  // format: TOF(0) TOIE(1) CPWMS(0) CLKSB(0) CLKSA(1) PS2(0) PS1(0) PS0(0)
-
     TPM1MOD = REPEAT; // set the counter modulo registers to 0x4E20 (= 20000 decimal).
 
-
     // configure TPM1 channel 1
-
     TPM1C1SC = 0x50;     // TPM1 Channel 1
-
     TPM1C1V = NOM_SPEED;   // set the channel 1 registers to 0x1000
-
     TPM1C2SC = 0x50;     // TPM1 Channel 2
-
     TPM1C2V = NOM_SPEED;   // set the channel 2 registers to 0x1000
-
 	TPM2SC =  0x08;			//select bus clock for TPM2, no TOV
 	TPM2C0SC = 0x44;		//turn on edge interrupt for TPM2 C0
 	TPM2C1SC = 0x44;		//turn on edge interrupt for TPM2 C1
 
-	//	PTBDD = 0b11111111;
-	//	PTBD = 0;
-	
-        select = 0;
-        preselect = 2;
-        intcounter = 5;
-        
-        PTADD = 0xFF;     //LCD pins
-        PTGDD = 0x07;     //LCD read/enable
-        ADC1CFG = 0x70;   //white line sensor
-       
-        lcd_init();
-        
-        writecmd(0x81); //moves cursor
-        writedata('I');
-        writedata('N');
-        writedata('D');
-        writedata('I');
-        writedata('A');
-              
-        while((PTDD & 0b00000100) != 0){
-        
-        if ((PTDD & 0b00001000) == 0){select++;}
-        if (preselect != select){
-        if (select > 2){select = 0;}
-        preselect = select;        
-        switch (select){
-                
-                case 0:
-                writecmd(0xC1);
-                writedata('A');
-                writedata('V');
-                writedata('O');
-                writedata('I');
-                writedata('D');
-                writedata(' ');
-                        break;
-                case 1:
-                writecmd(0xC1);
-                writedata(' ');
-                writedata('L');
-                writedata('I');
-                writedata('N');
-                writedata('E');
-                        break;
-                case 2:
-                writecmd(0xC1);
-                writedata('B');
-                writedata('A');
-                writedata('T');
-                writedata('T');
-                writedata('L');
-                writedata('E');
-                        break;
-        }
-        while((PTDD & 0b00001000) == 0){}
-        }
-        }
-        
-        EnableInterrupts;
+
+	//Initialise Variables
+    select = 0;
+    preselect = 2;
+    intcounter = 5;
+    
+    //Name Ports
+    PTADD = 0xFF;     //LCD pins
+    PTGDD = 0x07;     //LCD read/enable
+    ADC1CFG = 0x70;   //white line sensor
+   
+   	//Start LCD Init Procedure
+    lcd_init();
+    
+    writecmd(0x81); //moves cursor
+    writedata('I');
+    writedata('N');
+    writedata('D');
+    writedata('I');
+    writedata('A');
+             
+                 
+    //***********         
+    //MENU SYSTEM
+    //***********
+    while((PTDD & 0b00000100) != 0){
+    
+    if ((PTDD & 0b00001000) == 0){select++;}
+    if (preselect != select){
+    if (select > 2){select = 0;}
+    preselect = select;        
+    
+    //Display the current mode on the screen
+    switch (select){        
+            case 0: //Obstical Avoidance Mode
+            writecmd(0xC1);
+            writedata('A');
+            writedata('V');
+            writedata('O');
+            writedata('I');
+            writedata('D');
+            writedata(' ');
+                    break;
+            case 1: //Line Following Mode
+            writecmd(0xC1);
+            writedata(' ');
+            writedata('L');
+            writedata('I');
+            writedata('N');
+            writedata('E');
+                    break;
+            case 2: //Combat Mode
+            writecmd(0xC1);
+            writedata('B');
+            writedata('A');
+            writedata('T');
+            writedata('T');
+            writedata('L');
+            writedata('E');
+                    break;
+    }
+    while((PTDD & 0b00001000) == 0){}}}
+    
+    //Start the interupts
+    EnableInterrupts;
           
+    //Main Loop Here
     switch (select){
-    
-        case 0:
+        case 0: //Obstical Avoidance Mode
     for(;;) {
-    
+    	//Drive foreward by default
         DRIVE = FWD;
-        
         if ((PTDD & 0b00001100) != 0b00001100){
         if ((PTDD & 0b00001000) == 0){revleft();}
-        if ((PTDD & 0b00000100) == 0){revright();}
-        }
+        if ((PTDD & 0b00000100) == 0){revright();}        }
         if ((PTDD & 0b11000000) != 0){
         if ((PTDD_PTDD7== 0)&(PTDD_PTDD6==1)){iravoidl();}
-        if ((PTDD_PTDD7== 1)&(PTDD_PTDD6==0)){iravoidr();}
-        }
+        if ((PTDD_PTDD7== 1)&(PTDD_PTDD6==0)){iravoidr();}        }
     }    
-        case 1:
-    for(;;) {
- 
-        if ((adc2 & adc3 & adc4)<50)
-        {
-        DRIVE = FWD;
-        }
-        else
-        {
-        if (adc1 > 50){lineright();}
-        if (adc5 > 50){lineleft();}
-        }
-        //if ((adc1 & adc2 & adc3 & adc4) < 60){lineturnleft();}
-        //if ((adc2 & adc3 & adc4 & adc5) < 60){lineturnright();}
-        if ((adc1 & adc2 & adc3 & adc4 & adc5) > 50){lineturnleft();}
-                
-        //if ((adc1 & adc2 & adc3 & adc4 & adc5) > 50){lineturnleft();}
-        
-    }
     
-        case 2:
+        case 1: //Line Following Mode
+    for(;;) {
+    
+    //  White Line Sensor Array
+    //
+    //  adc1	adc2	adc3	adc4	adc5
+    //		||||||||||||||||||||||||||||
+    
+        if ((adc2 & adc4)<50) //If already on the line
+        {DRIVE = FWD;}else{
+        if (adc1 > 50){lineright();} //Too Far Left
+        elseif (adc5 > 50){lineleft();}}}//Too Far Right
+  
+        if ((adc1 & adc2 & adc3 & adc4 & adc5) > 50){lineturnleft();}}}//Reached a corner, turn left
+    
+        case 2: //Combat Mode
         for(;;){
-	      DRIVE = FWD;
+	      DRIVE = FWD; //Drives foreward by default
 		
         if(adc1 > 50){iravoidr();mode = 0;}
-	      if(adc5 > 50){iravoidl();mode = 0;}
-	      //if((adc1 & adc2 & adc3 & adc4 & adc5) < 50){
-    	  //        if (adc1>adc5){revleft();}else{revright();}
-    	  //}
+	    if(adc5 > 50){iravoidl();mode = 0;}
+
         if ((PTDD & 0b11000000) != 0){
         if ((PTDD_PTDD7== 0)&(PTDD_PTDD6==1)){lineright();mode = 1;}
         if ((PTDD_PTDD7== 1)&(PTDD_PTDD6==0)){lineleft();mode = 1;}
@@ -254,30 +232,27 @@ void main(void)
         if ((PTDD & 0b00001100) != 0b00001100){
         if ((PTDD & 0b00001000) == 0){distdelay(50);reverse();mode = 2;}
         if ((PTDD & 0b00000100) == 0){distdelay(50);reverse();mode = 2;}
-        }
-        }
+        }}
     }
-
 }
 
-interrupt 11 void TPM1SC_overflow()
+interrupt 11 void TPM1SC_overflow() //100Hz Interupt
 {   // interrupt vector: Vtpm1
 
-         TPM1SC_TOF = bitClear;
-
+         TPM1SC_TOF = bitClear; //Clears itself
          PTFD = DRIVE;       // turn on motors as configured by DRIVE (port A switches).
-         
-         speedcon();
+         speedcon(); //Straight driving algorithmx
 
-         if (COUNTER != 0){COUNTER--;}
+         if (COUNTER != 0){COUNTER--;} //Decrement Counter
          
-        intcounter--;
+        intcounter--; //Decrement a different counter
          
+        //Read white line sensor values
         TPM1SC_TOF = 0;       
         ADC1SC1 = 0;
         while (ADC1SC1_COCO == 0){  
         }
-        adc1 = ADC1RL*100/257;
+        adc1 = ADC1RL*100/257; //Convert into a percentage
         
         ADC1SC1 = 1;
         while (ADC1SC1_COCO == 0){  
@@ -321,7 +296,7 @@ interrupt 11 void TPM1SC_overflow()
         if (adc5>60){
         adc5hl = 0;}else{adc5hl = 1;}
         
-        alladc = adc1hl+adc2hl+adc3hl+adc4hl+adc5hl;
+        alladc = adc1hl+adc2hl+adc3hl+adc4hl+adc5hl; //Format a string that can be written to the display
         switch (alladc){
         
         default:
@@ -514,7 +489,7 @@ void stop (void)
 
 void reverse (void)
 {
-        DISTANCE = 100;
+        DISTANCE = 10;
         DRIVE = REV;
         while (DISTANCE != 0){}
 }
